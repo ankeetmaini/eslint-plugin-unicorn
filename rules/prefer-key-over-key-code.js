@@ -1,7 +1,6 @@
 'use strict';
 const getDocsUrl = require('./utils/get-docs-url');
 
-const keys = ['keyCode', 'charCode', 'which'];
 // https://github.com/facebook/react/blob/b87aabd/packages/react-dom/src/events/getEventKey.js#L36
 // only meta characters which can't be deciphered from String.fromCharCode
 const translateToKey = {
@@ -41,6 +40,18 @@ const translateToKey = {
 	144: 'NumLock',
 	145: 'ScrollLock',
 	224: 'Meta'
+};
+
+const findNearestIf = node => {
+	while (node) {
+		if (node.type === 'IfStatement') {
+			return node;
+		}
+
+		node = node.parent;
+	}
+
+	return null;
 };
 
 const isPropertyNamedAddEventListener = node =>
@@ -104,40 +115,35 @@ const util = context => {
 };
 
 const directAccessRule = context => node => {
-	const {report, event} = util(context);
-	// Normal case when usage is direct -> event.keyCode
+	const {report, event, getNearestAncestorByType} = util(context);
 
+	// Normal case when usage is direct -> event.keyCode
 	const isPropertyOfEvent = isPropertyOf(node, event);
 	if (isPropertyOfEvent) {
 		report(node);
-	}
-};
-
-const destructuredPropertyRule = context => node => {
-	const propertyName = node.value && node.value.name;
-	if (!keys.includes(propertyName)) {
 		return;
 	}
-
-	const {report, event, getNearestAncestorByType} = util(context);
 
 	// Destructured case
 	const nearestVariableDeclarator = getNearestAncestorByType(
 		'VariableDeclarator'
 	);
+	const nearestProperty = getNearestAncestorByType(
+		'Property'
+	);
 	const isDestructuredFromEvent =
 		nearestVariableDeclarator &&
 		nearestVariableDeclarator.init &&
 		nearestVariableDeclarator.init.name === event;
-
 	if (isDestructuredFromEvent) {
-		report(node.value);
+		console.log(nearestProperty.key === nearestProperty.value, '<==========');
+		report(nearestProperty.value);
 	}
 };
 
-const fix = (context, node) => fixer => {
-	const {getNearestAncestorByType} = util(context);
-	const nearestIf = getNearestAncestorByType('IfStatement');
+const fix = node => fixer => {
+	// Works for direct node and not work for references
+	const nearestIf = findNearestIf(node);
 	if (!nearestIf) {
 		return;
 	}
@@ -148,6 +154,7 @@ const fix = (context, node) => fixer => {
 
 	// Either a meta key or a printable character
 	const keyCode = translateToKey[right.value] || String.fromCharCode(right.value);
+
 	// And if we recognize the keyCode
 	if (!isRightValid || !keyCode) {
 		return;
@@ -164,7 +171,7 @@ const reportError = context => node => {
 	context.report({
 		message: `Use key instead of ${node.name}. ${extraCitation}`,
 		node,
-		fix: fix(context, node)
+		fix: fix(node)
 	});
 };
 
@@ -172,8 +179,7 @@ const create = context => {
 	return {
 		'Identifier:matches([name=keyCode], [name=charCode], [name=which])': directAccessRule(
 			context
-		),
-		Property: destructuredPropertyRule(context)
+		)
 	};
 };
 
